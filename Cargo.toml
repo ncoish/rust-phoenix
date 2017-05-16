@@ -1,0 +1,15 @@
+[package]
+name = "phoenix"
+version = "0.1.0"
+authors = ["Nick Coish <nick.coish@gmail.com>"]
+
+[lib]
+name = "mylib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mybin"
+path = "src/bin.rs"
+
+[dependencies]
+ws = "*"
