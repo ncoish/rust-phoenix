@@ -7,6 +7,5 @@
 #[cfg(all(feature = "nightly", test))]
 extern crate test;
 
-mod channel;
-mod socket;
-mod long_poller;
+pub mod channel;
+pub mod socket;
