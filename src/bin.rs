@@ -5,20 +5,14 @@ mod tests {
     }
 }
 
-extern crate ws;
+extern crate phoenix;
 
-use ws::{connect, CloseCode};
+use phoenix::socket;
 
 pub fn main() {
-    println!("Connecting...");
-    connect("ws://127.0.0.1:3012", |out| {
-        out.send("Hello WebSocket").unwrap();
-        out.send("Second Message").unwrap();
-
-        move |msg| {
-            println!("Got message: {}", msg);
-            out.close(CloseCode::Normal)
-        }
-    }).unwrap();
-   println!("Connection Complete!");
+    let mut sock = socket::Socket::new("Hello");
+    sock.set_callback_open(|| println!("Oh hello!"));
+    sock.process_events();
+    sock.set_callback_open(|| println!("Mello yellow"));
+    sock.process_events();
 }
