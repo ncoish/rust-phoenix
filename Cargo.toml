@@ -12,4 +12,4 @@ name = "test_binary"
 path = "src/bin.rs"
 
 [dependencies]
-websocket = "~>0.20"
+websocket = "0.20.2"
