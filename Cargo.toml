@@ -7,9 +7,5 @@ authors = ["Nick Coish <nick.coish@gmail.com>"]
 name = "phoenix"
 path = "src/lib.rs"
 
-[[bin]]
-name = "test_binary"
-path = "src/bin.rs"
-
 [dependencies]
 websocket = "0.20.2"
