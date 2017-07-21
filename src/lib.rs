@@ -15,14 +15,6 @@ pub mod socket;
 #[cfg(test)]
 mod tests {
     use super::socket;
-    // #[test]
-    // fn set_callback_test() {
-    //     let mut sock = socket::Socket::new("Hello");
-    //     sock.set_callback_open(|| println!("Oh hello!"));
-    //     sock.process_events();
-    //     sock.set_callback_open(|| println!("Mello yellow"));
-    //     sock.process_events();
-    // }
 
     #[test]
     fn can_construct_and_use_socket() {

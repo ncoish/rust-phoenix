@@ -1,8 +1,9 @@
 use std;
 use std::collections::HashMap;
 use std::net::TcpStream;
+use websocket;
 use websocket::ClientBuilder;
-use websocket::client::async::Client;
+use websocket::client::sync::Client;
 
 enum SocketState {
     Connecting,
@@ -34,17 +35,53 @@ impl Socket {
         self.state_change_open = Some(Box::new(c));
     }
 
+    // Temporary function for testing
     pub fn process_events(&mut self) {
         if let Some(ref mut func) = self.state_change_open {
             (func)()
         }
         else {
-            println!("it failed!")
+            println!("No function set for {}", "state_change_open")
+        }
+
+        if let Some(ref mut func) = self.state_change_close {
+            (func)(String::from("closing"))
+        }
+        else {
+            println!("No function set for {}", "state_change_close")
+        }
+
+        if let Some(ref mut func) = self.state_change_error {
+            (func)(String::from("error"))
+        }
+        else {
+            println!("No function set for {}", "state_change_error")
+        }
+
+        if let Some(ref mut func) = self.state_change_message {
+            (func)(String::from("message"))
+        }
+        else {
+            println!("No function set for {}", "state_change_message")
         }
     }
 
-    pub fn connect() {
-
+    pub fn connect(&mut self) -> Result<(), String> {
+        if let Some(conn) = self.connection.as_mut() {
+            return Ok(())
+        }
+        let client = ClientBuilder::new(&self.endpoint[..])
+        .unwrap()
+        .connect_insecure();
+        match client {
+            Err(e) => {
+                Err(String::from("Failed to connect to client"))
+            },
+            Ok(value) => {
+                self.connection = Some(value);
+                Ok(())
+            },
+        }
     }
 }
 
@@ -71,22 +108,22 @@ impl SocketBuilder {
         }
     }
 
-    pub fn add_on_open<'a, CB: 'static + FnMut()>(&'a mut self, c: CB) -> &'a mut Self {
+    pub fn add_on_open<CB: 'static + FnMut()>(mut self, c: CB) -> SocketBuilder {
         self.state_change_open = Some(Box::new(c));
         self
     }
 
-    pub fn add_on_close<'a, CB: 'static + FnMut(String)>(&'a mut self, c: CB) -> &'a mut Self {
+    pub fn add_on_close<CB: 'static + FnMut(String)>(mut self, c: CB) -> SocketBuilder {
         self.state_change_close = Some(Box::new(c));
         self
     }
 
-    pub fn add_on_error<'a, CB: 'static + FnMut(String)>(&'a mut self, c: CB) -> &'a mut Self {
+    pub fn add_on_error<CB: 'static + FnMut(String)>(mut self, c: CB) -> SocketBuilder {
         self.state_change_error = Some(Box::new(c));
         self
     }
 
-    pub fn add_on_message<'a, CB: 'static + FnMut(String)>(&'a mut self, c: CB) -> &'a mut Self {
+    pub fn add_on_message<CB: 'static + FnMut(String)>(mut self, c: CB) -> SocketBuilder {
         self.state_change_message = Some(Box::new(c));
         self
     }
