@@ -1,4 +1,5 @@
 use std;
+use std::fmt;
 use std::collections::HashMap;
 use std::net::TcpStream;
 use websocket;
@@ -24,6 +25,7 @@ pub struct Socket {
     endpoint:               String,
     //transport:              Transport,
     connection:             Option<Client<TcpStream>>,
+    timeout:                i32,
     state_change_open:      Option<Box<FnMut()>>,
     state_change_close:     Option<Box<FnMut(String)>>,
     state_change_error:     Option<Box<FnMut(String)>>,
@@ -85,10 +87,17 @@ impl Socket {
     }
 }
 
+impl fmt::Debug for Socket {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Socket to endpoint: {}", self.endpoint)
+    }
+}
+
 #[allow(dead_code)]
 pub struct SocketBuilder {
     endpoint:               String,
     //transport:              Transport,
+    timeout:                i32,
     state_change_open:      Option<Box<FnMut()>>,
     state_change_close:     Option<Box<FnMut(String)>>,
     state_change_error:     Option<Box<FnMut(String)>>,
@@ -101,6 +110,7 @@ impl SocketBuilder {
         SocketBuilder {
             endpoint:               endpoint,
             //transport:              transport,
+            timeout:                5000,
             state_change_open:      None,
             state_change_close:     None,
             state_change_error:     None,
@@ -132,6 +142,7 @@ impl SocketBuilder {
         Socket {
             endpoint:               self.endpoint,
             //transport:              self.transport,
+            timeout:                self.timeout,
             connection:             None,
             state_change_open:      self.state_change_open,
             state_change_close:     self.state_change_close,
