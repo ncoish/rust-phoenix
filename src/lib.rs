@@ -8,9 +8,12 @@
 #[cfg(all(feature = "nightly", test))]
 extern crate test;
 extern crate websocket;
+extern crate futures;
+extern crate tokio_core;
 
 pub mod channel;
 pub mod socket;
+pub mod callback;
 
 #[cfg(test)]
 mod tests {

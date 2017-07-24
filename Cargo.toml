@@ -7,5 +7,13 @@ authors = ["Nick Coish <nick.coish@gmail.com>"]
 name = "phoenix"
 path = "src/lib.rs"
 
+[[bin]]
+name = "test_app"
+path = "src/bin.rs"
+
 [dependencies]
 websocket = "0.20.2"
+futures = { version = "0.1", optional = false }
+tokio-core = { version = "0.1", optional = false }
+tokio-io = { version = "^0.1.2", optional = false }
+tokio-tls = { version = "0.1", optional = false }
