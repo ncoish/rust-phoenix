@@ -5,6 +5,7 @@ use std::net::TcpStream;
 use std::thread;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio_core::reactor::Core;
 use futures::future::Future;
@@ -43,9 +44,7 @@ pub struct WebSocket {
 pub struct Socket {
     endpoint:               String,
     //transport:              Transport,
-    //connection:             Option<Client<TcpStream>>,
-    //connection:             Option<Arc<WebSocket>>,
-    connected:              bool,
+    connected:              Arc<AtomicBool>,
     sender:                 Option<mpsc::Sender<websocket::OwnedMessage>>,
     timeout:                i32,
     state_change_open:      Option<callback::CallbackNoArg>,
@@ -90,7 +89,7 @@ impl Socket {
         // if let Some(conn) = self.connection.as_mut() {
         //     return Ok(())
         // }
-        if self.connected {
+        if self.connected.load(Ordering::Relaxed) {
             return Ok(())
         }
 
@@ -120,7 +119,7 @@ impl Socket {
             core.run(runner).unwrap();
         });
         self.sender = Some(usr_msg);
-        self.connected = true;
+        self.connected.store(true, Ordering::Relaxed);
         return Ok(())
         // let client = ClientBuilder::new(&self.endpoint[..])
         // .unwrap()
@@ -141,6 +140,12 @@ impl Socket {
         //         Ok(())
         //     },
         // }
+    }
+
+    pub fn disconnect(&mut self) -> Result<(), String> {
+        // Placeholder
+        self.connected.store(false, Ordering::Relaxed);
+        Ok(())
     }
 
     pub fn send(&mut self, message: String) {
@@ -210,7 +215,7 @@ impl SocketBuilder {
             endpoint:               self.endpoint,
             //transport:              self.transport,
             timeout:                self.timeout,
-            connected:              false,
+            connected:              Arc::new(AtomicBool::new(false)),
             sender:                 None,
             state_change_open:      self.state_change_open,
             state_change_close:     self.state_change_close,
