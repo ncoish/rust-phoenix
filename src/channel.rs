@@ -61,7 +61,7 @@ pub struct Channel {
 }
 
 impl Channel {
-    pub fn new(topic: String, params: HashMap<String, String>, socket: Socket) -> Self{
+    pub fn new(topic: String, params: HashMap<String, String>, socket: &Socket) -> Self{
         Channel {
             state: ChannelState::Closed,
             topic: topic,

@@ -22,6 +22,7 @@ use websocket::result::WebSocketError;
 use websocket::{Message, OwnedMessage};
 
 use callback;
+use channel as phx_channel;
 
 enum SocketState {
     Connecting,
@@ -40,11 +41,10 @@ pub struct WebSocket {
     receiver: websocket::receiver::Receiver,
 }
 
-// TODO: Callbacks attributes should probably be list of callbacks
-//       to conform to javascript client library.
 pub struct Socket {
     endpoint:               String,
     //transport:              Transport,
+    channels:               Vec<Box<phx_channel::Channel>>,
     connected:              Arc<AtomicBool>,
     sender:                 Option<mpsc::Sender<websocket::OwnedMessage>>,
     timeout:                i32,
@@ -145,6 +145,10 @@ impl Socket {
         Ok(())
     }
 
+    pub fn channel(&mut self, topic: String, chanParams: HashMap<String, String>) {
+        let chan = phx_channel::Channel::new(topic, chanParams, self);
+    }
+
     pub fn send(&mut self, message: String) {
         match self.sender.as_mut() {
             None => println!("Connection not established"),
@@ -195,7 +199,6 @@ impl SocketBuilder {
     }
 
     pub fn add_on_open<CB: 'static + FnMut() + Send>(mut self, c: CB) -> SocketBuilder {
-        //self.state_change_open = Some(Box::new(c));
         self.state_change_open.push(Box::new(c));
         self
     }
@@ -229,16 +232,13 @@ impl SocketBuilder {
     }
 
     pub fn finish(mut self) -> Socket {
-        //self.state_change_open.push(Box::new(SocketBuilder::default_on_open));
-        //self.add_on_close(default_on_close);
-        //self.add_on_error(default_on_error);
-        //self.add_on_messagen(default_on_message);
         Socket {
             endpoint:               self.endpoint,
             //transport:              self.transport,
-            timeout:                self.timeout,
+            channels:               Vec::new(),
             connected:              Arc::new(ATOMIC_BOOL_INIT),
             sender:                 None,
+            timeout:                self.timeout,
             current_ref:            Mutex::new(0),
             state_change_open:      Arc::new(Mutex::new(self.state_change_open)),
             state_change_close:     Arc::new(Mutex::new(self.state_change_close)),
