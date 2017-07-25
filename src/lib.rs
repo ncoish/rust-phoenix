@@ -7,13 +7,19 @@
 
 #[cfg(all(feature = "nightly", test))]
 extern crate test;
+extern crate serde;
+extern crate serde_json;
 extern crate websocket;
 extern crate futures;
 extern crate tokio_core;
 
+#[macro_use]
+extern crate serde_derive;
+
 pub mod channel;
 pub mod socket;
 pub mod callback;
+mod push;
 
 #[cfg(test)]
 mod tests {

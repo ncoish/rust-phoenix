@@ -5,7 +5,8 @@ use std::net::TcpStream;
 use std::thread;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, ATOMIC_BOOL_INIT, Ordering};
+use std::sync::Mutex;
 
 use tokio_core::reactor::Core;
 use futures::future::Future;
@@ -13,6 +14,7 @@ use futures::sink::Sink;
 use futures::stream::Stream;
 use futures::sync::mpsc;
 
+use serde_json;
 use websocket;
 use websocket::ClientBuilder;
 use websocket::result::WebSocketError;
@@ -38,7 +40,6 @@ pub struct WebSocket {
     receiver: websocket::receiver::Receiver,
 }
 
-// TODO: Probably want to implement builder pattern here
 // TODO: Callbacks attributes should probably be list of callbacks
 //       to conform to javascript client library.
 pub struct Socket {
@@ -47,37 +48,41 @@ pub struct Socket {
     connected:              Arc<AtomicBool>,
     sender:                 Option<mpsc::Sender<websocket::OwnedMessage>>,
     timeout:                i32,
-    state_change_open:      Option<callback::CallbackNoArg>,
-    state_change_close:     Option<callback::CallbackOneArg>,
-    state_change_error:     Option<callback::CallbackOneArg>,
-    state_change_message:   Option<callback::CallbackOneArg>,
+    current_ref:            Mutex<u32>,
+    state_change_open:      Arc<Mutex<Option<callback::CallbackNoArg>>>,
+    state_change_close:     Arc<Mutex<Option<callback::CallbackOneArg>>>,
+    state_change_error:     Arc<Mutex<Option<callback::CallbackOneArg>>>,
+    state_change_message:   Arc<Mutex<Option<callback::CallbackOneArg>>>,
 }
 
 impl Socket {
     // Temporary function for testing
     pub fn process_events(&mut self) {
-        if let Some(ref mut func) = self.state_change_open {
+        let mut internal = self.state_change_open.lock().unwrap();
+        if let Some(ref mut func) = *internal {
             (func)()
         }
         else {
             println!("No function set for {}", "state_change_open")
         }
-
-        if let Some(ref mut func) = self.state_change_close {
+        let mut internal = self.state_change_close.lock().unwrap();
+        if let Some(ref mut func) = *internal {
             (func)(String::from("closing"))
         }
         else {
             println!("No function set for {}", "state_change_close")
         }
 
-        if let Some(ref mut func) = self.state_change_error {
+        let mut internal = self.state_change_error.lock().unwrap();
+        if let Some(ref mut func) = *internal {
             (func)(String::from("error"))
         }
         else {
             println!("No function set for {}", "state_change_error")
         }
 
-        if let Some(ref mut func) = self.state_change_message {
+        let mut internal = self.state_change_message.lock().unwrap();
+        if let Some(ref mut func) = *internal {
             (func)(String::from("message"))
         }
         else {
@@ -86,14 +91,16 @@ impl Socket {
     }
 
     pub fn connect(&mut self) -> Result<(), String> {
-        // if let Some(conn) = self.connection.as_mut() {
-        //     return Ok(())
-        // }
         if self.connected.load(Ordering::Relaxed) {
             return Ok(())
         }
 
         let connection_string = self.endpoint.clone();
+        let open_lock = self.state_change_open.clone();
+        let close_lock = self.state_change_close.clone();
+        let error_lock = self.state_change_error.clone();
+        let message_lock = self.state_change_message.clone();
+
         let (usr_msg, stdin_ch) = mpsc::channel(0);
 
         let connection_thread = thread::spawn(move || {
@@ -103,43 +110,50 @@ impl Socket {
                 .add_protocol("rust-websocket")
                 .async_connect_insecure(&core.handle())
                 .and_then(|(duplex, _)| {
+                    let mut internal = open_lock.lock().unwrap();
+                    if let Some(ref mut func) = *internal {
+                        (func)();
+                    }
                     let (sink, stream) = duplex.split();
                     stream.filter_map(|message| {
-                        println!("Received Message: {:?}", message);
                         match message {
-                            OwnedMessage::Close(e) => Some(OwnedMessage::Close(e)),
-                            OwnedMessage::Ping(d) => Some(OwnedMessage::Pong(d)),
-                            _ => None,
+                            OwnedMessage::Close(e) => {
+                                let mut internal = close_lock.lock().unwrap();
+                                if let Some(ref mut func) = *internal {
+                                    (func)(e.clone().unwrap().reason);
+                                }
+                                Some(OwnedMessage::Close(e))
+                            },
+                            OwnedMessage::Ping(d) => {
+                                println!("Got a ping!");
+                                Some(OwnedMessage::Pong(d))
+                            },
+                            OwnedMessage::Pong(d) => {
+                                println!("Got a pong for some reason");
+                                None
+                            }
+                            OwnedMessage::Text(text) => {
+                                let mut internal = message_lock.lock().unwrap();
+                                if let Some(ref mut func) = *internal {
+                                    (func)(text);
+                                }
+                                None
+                            },
+                            OwnedMessage::Binary(bin) => {
+                                println!("binary: {:?}", bin);
+                                None
+                            },
+
                         }
                     })
                     .select(stdin_ch.map_err(|_| WebSocketError::NoDataAvailable))
                     .forward(sink)
                 });
-
             core.run(runner).unwrap();
         });
         self.sender = Some(usr_msg);
         self.connected.store(true, Ordering::Relaxed);
         return Ok(())
-        // let client = ClientBuilder::new(&self.endpoint[..])
-        // .unwrap()
-        // .connect_insecure();
-        // match client {
-        //     Err(e) => {
-        //         Err(String::from("Failed to connect to client"))
-        //     },
-        //     Ok(value) => {
-        //         //self.connection = Some(value);
-        //         // let (mut receiver, mut sender) = value.split().unwrap();
-        //         // self.connection = Some(WebSocket {
-        //         //     sender: sender,
-        //         //     receiver: receiver,
-        //         // });
-        //         // Spin up some thread here
-        //         //self.processing_loop();
-        //         Ok(())
-        //     },
-        // }
     }
 
     pub fn disconnect(&mut self) -> Result<(), String> {
@@ -156,6 +170,13 @@ impl Socket {
                 sink.send(OwnedMessage::Text(message));
             }
         }
+    }
+
+    fn make_ref(&mut self) -> u32 {
+        let mut ref_num = self.current_ref.lock().unwrap();
+        let return_ref = *ref_num;
+        *ref_num += 1;
+        return return_ref
     }
 }
 
@@ -190,22 +211,22 @@ impl SocketBuilder {
         }
     }
 
-    pub fn add_on_open<CB: 'static + FnMut()>(mut self, c: CB) -> SocketBuilder {
+    pub fn add_on_open<CB: 'static + FnMut() + Send>(mut self, c: CB) -> SocketBuilder {
         self.state_change_open = Some(Box::new(c));
         self
     }
 
-    pub fn add_on_close<CB: 'static + FnMut(String)>(mut self, c: CB) -> SocketBuilder {
+    pub fn add_on_close<CB: 'static + FnMut(String) + Send>(mut self, c: CB) -> SocketBuilder {
         self.state_change_close = Some(Box::new(c));
         self
     }
 
-    pub fn add_on_error<CB: 'static + FnMut(String)>(mut self, c: CB) -> SocketBuilder {
+    pub fn add_on_error<CB: 'static + FnMut(String) + Send>(mut self, c: CB) -> SocketBuilder {
         self.state_change_error = Some(Box::new(c));
         self
     }
 
-    pub fn add_on_message<CB: 'static + FnMut(String)>(mut self, c: CB) -> SocketBuilder {
+    pub fn add_on_message<CB: 'static + FnMut(String) + Send>(mut self, c: CB) -> SocketBuilder {
         self.state_change_message = Some(Box::new(c));
         self
     }
@@ -215,12 +236,13 @@ impl SocketBuilder {
             endpoint:               self.endpoint,
             //transport:              self.transport,
             timeout:                self.timeout,
-            connected:              Arc::new(AtomicBool::new(false)),
+            connected:              Arc::new(ATOMIC_BOOL_INIT),
             sender:                 None,
-            state_change_open:      self.state_change_open,
-            state_change_close:     self.state_change_close,
-            state_change_error:     self.state_change_error,
-            state_change_message:   self.state_change_message,
+            current_ref:            Mutex::new(0),
+            state_change_open:      Arc::new(Mutex::new(self.state_change_open)),
+            state_change_close:     Arc::new(Mutex::new(self.state_change_close)),
+            state_change_error:     Arc::new(Mutex::new(self.state_change_error)),
+            state_change_message:   Arc::new(Mutex::new(self.state_change_message)),
         }
     }
 }
