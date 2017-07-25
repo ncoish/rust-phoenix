@@ -49,44 +49,30 @@ pub struct Socket {
     sender:                 Option<mpsc::Sender<websocket::OwnedMessage>>,
     timeout:                i32,
     current_ref:            Mutex<u32>,
-    state_change_open:      Arc<Mutex<Option<callback::CallbackNoArg>>>,
-    state_change_close:     Arc<Mutex<Option<callback::CallbackOneArg>>>,
-    state_change_error:     Arc<Mutex<Option<callback::CallbackOneArg>>>,
-    state_change_message:   Arc<Mutex<Option<callback::CallbackOneArg>>>,
+    state_change_open:      Arc<Mutex<Vec<callback::CallbackNoArg>>>,
+    state_change_close:     Arc<Mutex<Vec<callback::CallbackOneArg>>>,
+    state_change_error:     Arc<Mutex<Vec<callback::CallbackOneArg>>>,
+    state_change_message:   Arc<Mutex<Vec<callback::CallbackOneArg>>>,
 }
 
 impl Socket {
     // Temporary function for testing
     pub fn process_events(&mut self) {
-        let mut internal = self.state_change_open.lock().unwrap();
-        if let Some(ref mut func) = *internal {
+
+        for func in self.state_change_open.lock().unwrap().iter_mut() {
             (func)()
         }
-        else {
-            println!("No function set for {}", "state_change_open")
-        }
-        let mut internal = self.state_change_close.lock().unwrap();
-        if let Some(ref mut func) = *internal {
+
+        for func in self.state_change_close.lock().unwrap().iter_mut() {
             (func)(String::from("closing"))
         }
-        else {
-            println!("No function set for {}", "state_change_close")
-        }
 
-        let mut internal = self.state_change_error.lock().unwrap();
-        if let Some(ref mut func) = *internal {
+        for func in self.state_change_error.lock().unwrap().iter_mut() {
             (func)(String::from("error"))
         }
-        else {
-            println!("No function set for {}", "state_change_error")
-        }
 
-        let mut internal = self.state_change_message.lock().unwrap();
-        if let Some(ref mut func) = *internal {
+        for func in self.state_change_message.lock().unwrap().iter_mut() {
             (func)(String::from("message"))
-        }
-        else {
-            println!("No function set for {}", "state_change_message")
         }
     }
 
@@ -110,16 +96,14 @@ impl Socket {
                 .add_protocol("rust-websocket")
                 .async_connect_insecure(&core.handle())
                 .and_then(|(duplex, _)| {
-                    let mut internal = open_lock.lock().unwrap();
-                    if let Some(ref mut func) = *internal {
+                    for func in open_lock.lock().unwrap().iter_mut() {
                         (func)();
                     }
                     let (sink, stream) = duplex.split();
                     stream.filter_map(|message| {
                         match message {
                             OwnedMessage::Close(e) => {
-                                let mut internal = close_lock.lock().unwrap();
-                                if let Some(ref mut func) = *internal {
+                                for func in close_lock.lock().unwrap().iter_mut() {
                                     (func)(e.clone().unwrap().reason);
                                 }
                                 Some(OwnedMessage::Close(e))
@@ -133,9 +117,8 @@ impl Socket {
                                 None
                             }
                             OwnedMessage::Text(text) => {
-                                let mut internal = message_lock.lock().unwrap();
-                                if let Some(ref mut func) = *internal {
-                                    (func)(text);
+                                for func in message_lock.lock().unwrap().iter_mut() {
+                                    (func)(text.clone());
                                 }
                                 None
                             },
@@ -191,10 +174,10 @@ pub struct SocketBuilder {
     endpoint:               String,
     //transport:              Transport,
     timeout:                i32,
-    state_change_open:      Option<callback::CallbackNoArg>,
-    state_change_close:     Option<callback::CallbackOneArg>,
-    state_change_error:     Option<callback::CallbackOneArg>,
-    state_change_message:   Option<callback::CallbackOneArg>,
+    state_change_open:      Vec<callback::CallbackNoArg>,
+    state_change_close:     Vec<callback::CallbackOneArg>,
+    state_change_error:     Vec<callback::CallbackOneArg>,
+    state_change_message:   Vec<callback::CallbackOneArg>,
 }
 
 #[allow(dead_code)]
@@ -204,34 +187,52 @@ impl SocketBuilder {
             endpoint:               endpoint,
             //transport:              transport,
             timeout:                5000,
-            state_change_open:      None,
-            state_change_close:     None,
-            state_change_error:     None,
-            state_change_message:   None,
+            state_change_open:      vec![Box::new(SocketBuilder::default_on_open)],
+            state_change_close:     vec![Box::new(SocketBuilder::default_on_close)],
+            state_change_error:     vec![Box::new(SocketBuilder::default_on_error)],
+            state_change_message:   vec![Box::new(SocketBuilder::default_on_message)],
         }
     }
 
     pub fn add_on_open<CB: 'static + FnMut() + Send>(mut self, c: CB) -> SocketBuilder {
-        self.state_change_open = Some(Box::new(c));
+        //self.state_change_open = Some(Box::new(c));
+        self.state_change_open.push(Box::new(c));
         self
     }
 
     pub fn add_on_close<CB: 'static + FnMut(String) + Send>(mut self, c: CB) -> SocketBuilder {
-        self.state_change_close = Some(Box::new(c));
+        self.state_change_close.push(Box::new(c));
         self
     }
 
     pub fn add_on_error<CB: 'static + FnMut(String) + Send>(mut self, c: CB) -> SocketBuilder {
-        self.state_change_error = Some(Box::new(c));
+        self.state_change_error.push(Box::new(c));
         self
     }
 
     pub fn add_on_message<CB: 'static + FnMut(String) + Send>(mut self, c: CB) -> SocketBuilder {
-        self.state_change_message = Some(Box::new(c));
+        self.state_change_message.push(Box::new(c));
         self
     }
 
-    pub fn finish(self) -> Socket {
+    fn default_on_open() {
+        println!("Hello there!");
+    }
+    fn default_on_close(s: String) {
+        println!("close: {}", s);
+    }
+    fn default_on_error(e: String) {
+        println!("error: {}", e);
+    }
+    fn default_on_message(s: String) {
+        println!("message: {}", s);
+    }
+
+    pub fn finish(mut self) -> Socket {
+        //self.state_change_open.push(Box::new(SocketBuilder::default_on_open));
+        //self.add_on_close(default_on_close);
+        //self.add_on_error(default_on_error);
+        //self.add_on_messagen(default_on_message);
         Socket {
             endpoint:               self.endpoint,
             //transport:              self.transport,
