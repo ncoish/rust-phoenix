@@ -88,6 +88,7 @@ impl Socket {
         let message_lock = self.state_change_message.clone();
 
         let (usr_msg, stdin_ch) = mpsc::channel(0);
+        //let ref_self = self.clone();
 
         let connection_thread = thread::spawn(move || {
             let mut core = Core::new().unwrap();
@@ -96,6 +97,7 @@ impl Socket {
                 .add_protocol("rust-websocket")
                 .async_connect_insecure(&core.handle())
                 .and_then(|(duplex, _)| {
+                    //ref_self.default_on_open();
                     for func in open_lock.lock().unwrap().iter_mut() {
                         (func)();
                     }
@@ -146,7 +148,7 @@ impl Socket {
     }
 
     pub fn channel(&mut self, topic: String, chanParams: HashMap<String, String>) {
-        let chan = phx_channel::Channel::new(topic, chanParams, self);
+        let chan = phx_channel::Channel::new(topic, chanParams);
     }
 
     pub fn send(&mut self, message: String) {
@@ -164,6 +166,11 @@ impl Socket {
         let return_ref = *ref_num;
         *ref_num += 1;
         return return_ref
+    }
+
+    fn default_on_open(&mut self) {
+        println!("Hello there!");
+        println!("{}", self.timeout);
     }
 }
 
@@ -246,4 +253,5 @@ impl SocketBuilder {
             state_change_message:   Arc::new(Mutex::new(self.state_change_message)),
         }
     }
+    //pub fn connect(mut self) ->
 }

@@ -51,7 +51,7 @@ pub struct Channel {
     state:                  ChannelState,
     topic:                  String,
     params:                 HashMap<String, String>,
-    socket:                 Socket,
+    //socket:                 Socket,
     bindings:               HashMap<ChannelEvent, Vec<Callback>>,
     timeout:                u32,
     rejoin_timer:           i32, // TODO: Need to find appropriate timer library. This should NOT be i32
@@ -61,12 +61,12 @@ pub struct Channel {
 }
 
 impl Channel {
-    pub fn new(topic: String, params: HashMap<String, String>, socket: &Socket) -> Self{
+    pub fn new(topic: String, params: HashMap<String, String>) -> Self{
         Channel {
             state: ChannelState::Closed,
             topic: topic,
             params: params,
-            socket: socket,
+            //socket: socket,
             bindings: HashMap::with_capacity(5),
             timeout: 5000,
             rejoin_timer: 0,
