@@ -7,6 +7,7 @@ use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, ATOMIC_BOOL_INIT, Ordering};
 use std::sync::Mutex;
+use std::error;
 
 use tokio_core::reactor::Core;
 use futures::future::Future;
@@ -39,6 +40,82 @@ enum SocketState {
 pub struct WebSocket {
     sender: websocket::sender::Sender,
     receiver: websocket::receiver::Receiver,
+}
+
+pub struct SocketHandler {
+    connected: Arc<AtomicBool>,
+    socket: Arc<Mutex<Socket>>,
+    sender: Option<mpsc::Sender<websocket::OwnedMessage>>
+}
+
+impl SocketHandler {
+    pub fn connect(&mut self) -> Result<(), Box<error::Error>> {
+        if self.connected.load(Ordering::Relaxed) {
+            return Ok(())
+        }
+        let mut socket = self.socket.clone();
+        let (usr_msg, stdin_ch) = mpsc::channel(0);
+        thread::spawn(move || {
+            let socket = socket.lock().unwrap();
+            let mut core = Core::new().unwrap();
+            let runner = ClientBuilder::new(&socket.endpoint)//(&self.endpoint[..])
+                .unwrap()
+                .add_protocol("rust-websocket")
+                .async_connect_insecure(&core.handle())
+                .and_then(|(duplex, _)| {
+                    //ref_self.default_on_open();
+                    for func in socket.state_change_open.lock().unwrap().iter_mut() {
+                        (func)();
+                    }
+                    let (sink, stream) = duplex.split();
+                    stream.filter_map(|message| {
+                        match message {
+                            OwnedMessage::Close(e) => {
+                                for func in socket.state_change_close.lock().unwrap().iter_mut() {
+                                    (func)(e.clone().unwrap().reason);
+                                }
+                                Some(OwnedMessage::Close(e))
+                            },
+                            OwnedMessage::Ping(d) => {
+                                println!("Got a ping!");
+                                Some(OwnedMessage::Pong(d))
+                            },
+                            OwnedMessage::Pong(d) => {
+                                println!("Got a pong for some reason");
+                                None
+                            }
+                            OwnedMessage::Text(text) => {
+                                for func in socket.state_change_message.lock().unwrap().iter_mut() {
+                                    (func)(text.clone());
+                                }
+                                None
+                            },
+                            OwnedMessage::Binary(bin) => {
+                                println!("binary: {:?}", bin);
+                                None
+                            },
+
+                        }
+                    })
+                    .select(stdin_ch.map_err(|_| WebSocketError::NoDataAvailable))
+                    .forward(sink)
+                });
+            core.run(runner).unwrap();
+        });
+        self.sender = Some(usr_msg);
+        self.connected.store(true, Ordering::Relaxed);
+        return Ok(())
+    }
+    
+    pub fn send(&mut self, message: String) {
+        match self.sender.as_mut() {
+            None => println!("Connection not established"),
+            Some(value) => {
+                let mut sink = value.wait();
+                sink.send(OwnedMessage::Text(message));
+            }
+        }
+    }
 }
 
 pub struct Socket {
@@ -151,16 +228,6 @@ impl Socket {
         let chan = phx_channel::Channel::new(topic, chanParams);
     }
 
-    pub fn send(&mut self, message: String) {
-        match self.sender.as_mut() {
-            None => println!("Connection not established"),
-            Some(value) => {
-                let mut sink = value.wait();
-                sink.send(OwnedMessage::Text(message));
-            }
-        }
-    }
-
     fn make_ref(&mut self) -> u32 {
         let mut ref_num = self.current_ref.lock().unwrap();
         let return_ref = *ref_num;
@@ -238,8 +305,8 @@ impl SocketBuilder {
         println!("message: {}", s);
     }
 
-    pub fn finish(mut self) -> Socket {
-        Socket {
+    pub fn finish(mut self) -> SocketHandler {
+        let socket = Socket {
             endpoint:               self.endpoint,
             //transport:              self.transport,
             channels:               Vec::new(),
@@ -251,6 +318,12 @@ impl SocketBuilder {
             state_change_close:     Arc::new(Mutex::new(self.state_change_close)),
             state_change_error:     Arc::new(Mutex::new(self.state_change_error)),
             state_change_message:   Arc::new(Mutex::new(self.state_change_message)),
+        };
+
+        SocketHandler {
+            connected: Arc::new(ATOMIC_BOOL_INIT),
+            socket: Arc::new(Mutex::new(socket)),
+            sender: None,
         }
     }
     //pub fn connect(mut self) ->
