@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::net::TcpStream;
 use std::thread;
 use std::sync::mpsc::channel;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::sync::atomic::{AtomicBool, ATOMIC_BOOL_INIT, Ordering};
 use std::sync::Mutex;
 use std::error;
+use std::cell::RefCell;
 
 use tokio_core::reactor::Core;
 use futures::future::Future;
@@ -43,8 +44,8 @@ pub struct WebSocket {
 }
 
 pub struct SocketHandler {
-    connected: Arc<AtomicBool>,
-    socket: Arc<Mutex<Socket>>,
+    connected: AtomicBool,
+    socket: Arc<Mutex<Option<Socket>>>,
     sender: Option<mpsc::Sender<websocket::OwnedMessage>>
 }
 
@@ -54,9 +55,12 @@ impl SocketHandler {
             return Ok(())
         }
         let mut socket = self.socket.clone();
+        if socket.lock().unwrap().is_none() {
+            return Err(From::from("No socket assigned"))
+        }
         let (usr_msg, stdin_ch) = mpsc::channel(0);
         thread::spawn(move || {
-            let socket = socket.lock().unwrap();
+            let socket = socket.lock().unwrap().unwrap();
             let mut core = Core::new().unwrap();
             let runner = ClientBuilder::new(&socket.endpoint)//(&self.endpoint[..])
                 .unwrap()
@@ -106,6 +110,10 @@ impl SocketHandler {
         self.connected.store(true, Ordering::Relaxed);
         return Ok(())
     }
+
+    fn set_socket(&mut self, socket: Socket) {
+        self.socket = Arc::new(Mutex::new(Some(socket)));
+    }
     
     pub fn send(&mut self, message: String) {
         match self.sender.as_mut() {
@@ -120,9 +128,10 @@ impl SocketHandler {
 
 pub struct Socket {
     endpoint:               String,
+    handler:                Weak<SocketHandler>,
     //transport:              Transport,
-    channels:               Vec<Box<phx_channel::Channel>>,
-    connected:              Arc<AtomicBool>,
+    channels:               Vec<Arc<Mutex<phx_channel::Channel>>>,
+    connected:              AtomicBool,
     sender:                 Option<mpsc::Sender<websocket::OwnedMessage>>,
     timeout:                i32,
     current_ref:            Mutex<u32>,
@@ -305,12 +314,19 @@ impl SocketBuilder {
         println!("message: {}", s);
     }
 
-    pub fn finish(mut self) -> SocketHandler {
+    pub fn finish(mut self) -> Arc<SocketHandler> {
+        let mut socketHandler = SocketHandler {
+            connected: ATOMIC_BOOL_INIT,
+            socket: Arc::new(Mutex::new(None)),
+            sender: None,
+        };
+        let mut socketHandler = Arc::new(socketHandler);
         let socket = Socket {
             endpoint:               self.endpoint,
             //transport:              self.transport,
+            handler:                Arc::downgrade(&socketHandler),
             channels:               Vec::new(),
-            connected:              Arc::new(ATOMIC_BOOL_INIT),
+            connected:              ATOMIC_BOOL_INIT,
             sender:                 None,
             timeout:                self.timeout,
             current_ref:            Mutex::new(0),
@@ -319,12 +335,9 @@ impl SocketBuilder {
             state_change_error:     Arc::new(Mutex::new(self.state_change_error)),
             state_change_message:   Arc::new(Mutex::new(self.state_change_message)),
         };
+        socketHandler.lock().unwrap().set_socket(socket);
 
-        SocketHandler {
-            connected: Arc::new(ATOMIC_BOOL_INIT),
-            socket: Arc::new(Mutex::new(socket)),
-            sender: None,
-        }
+        socketHandler
     }
     //pub fn connect(mut self) ->
 }
